@@ -66,7 +66,7 @@ Any additional Python dependencies are managed via Poetry in the `pyproject.toml
   poetry install
   ```
 
-3. **Virtual Environment***
+3. **Virtual Environment**
 
   ```bash
   poetry shell
@@ -77,6 +77,7 @@ Any additional Python dependencies are managed via Poetry in the `pyproject.toml
   ```
 
 4. **Run CoCoTB as usual**
+
   That should be it.
 
 ---
