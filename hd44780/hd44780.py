@@ -717,7 +717,7 @@ class HD44780():
         self.update_entry_mode() #Update display
         return data
 
-    def command(self, rs: int, rw: int, db: int):
+    def command(self, rs: int, rw: int, db: int) -> None | int:
         if rs == 1: # Register Select Data
             if rw == 1: # Read
                 data = self.read_data()
@@ -727,32 +727,28 @@ class HD44780():
         else: # Register Select Instruction
             if rw == 1: # Read Busy
                 # What you gonna do? huh?
+                # TODO: Add BUSY
                 return 0x00
             else:
                 db_ = db
                 dbl = [0] * 8
                 for i in range(8):
                     dbl[i] = (db_ >> i) & 0x1
-                print(dbl)
                 if dbl[7]: # DDRAM Address
                     self.set_ddram_addr(db_)
                 elif dbl[6]: # CGRAM Address
-                    pass
+                    pass # TODO: Add CGRAM
                 elif dbl[5]: # Function Set
                     self.function_set(bool(dbl[4]), bool(dbl[3]), bool(dbl[2]))
                 elif dbl[4]: # Cursor Control
                     self.cursor_control(bool(dbl[3]), bool(dbl[2]))
                 elif dbl[3]: # Display Control
                     self.display_control(bool(dbl[2]), bool(dbl[1]), bool(dbl[0]))
-                    print(f"Display Control {bool(dbl[2])} {bool(dbl[1])} {bool(dbl[0])}")
                 elif dbl[2]: # Entry Mode Set
                     self.entry_mode_set(bool(dbl[1]), bool(dbl[0]))
-                    print(f"Entry Mode {bool(dbl[1])} {bool(dbl[0])}")
                 elif dbl[1]: # Return Home
                     self.return_home()
-                    print("Home")
                 elif dbl[0]: # Clear
                     self.clear()
-                    print("Clear")
                 else:
                     raise Warning("Illegal Instruction")

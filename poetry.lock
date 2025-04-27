@@ -57,6 +57,19 @@ find-libpython = "*"
 bus = ["cocotb-bus"]
 
 [[package]]
+name = "cocotb-bus"
+version = "0.2.1"
+description = ""
+optional = false
+python-versions = ">=3.5"
+files = [
+    {file = "cocotb-bus-0.2.1.tar.gz", hash = "sha256:a197aa4b0e0ad28469c8877b41b3fb2ec0206da9f491b9276d1578ce6dd8aa8d"},
+]
+
+[package.dependencies]
+cocotb = ">=1.5.0.dev,<2.0"
+
+[[package]]
 name = "find-libpython"
 version = "0.4.0"
 description = "Finds the libpython associated with your environment, wherever it may be hiding"
@@ -139,4 +152,4 @@ files = [
 [metadata]
 lock-version = "2.0"
 python-versions = "^3.9"
-content-hash = "473c132a49e6ca3429a976cc7b5c921e92c90cd826179c883f4aa8cbc58921a3"
+content-hash = "3f52d8083530071129dce457465298a0dd87d201c2c30535dd40184a909ca55b"
