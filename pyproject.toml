@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "hd44780-sim"
+version = "0.0.1"
+description = "A simple simulator for HD44780 based displays"
+authors = ["Anubhav Mattoo <anubhavmattoo@outlook.com>"]
+license = "GPLv3"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.9"
+pygame = "^2.6.1"
+cocotb = "^1.9.2"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
