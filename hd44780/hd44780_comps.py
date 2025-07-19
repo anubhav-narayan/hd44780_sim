@@ -16,6 +16,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+from cocotb import logging
 from cocotb.triggers import RisingEdge, Timer
 from cocotb_bus.bus import Bus
 from .hd44780 import HD44780
@@ -29,7 +30,7 @@ class HD44780Bus(Bus):
     _optional_signals = []
 
     def __init__(self, entity=None, prefix=None, **kwargs):
-           super().__init__(entity, prefix, self._signals, optional_signals=self._optional_signals, **kwargs)
+       super().__init__(entity, prefix, self._signals, optional_signals=self._optional_signals, **kwargs)
 
 
     @classmethod
@@ -88,6 +89,8 @@ class HD44780Sim(HD44780):
         super().__init__(segments, lines, cols, rows, pixel_size, pixel_border, segment_margin, line_margin, display_border)
         self.dut = dut
         self.bus = HD44780Bus.from_prefix(dut, prefix)
+        self.log = logging.getLogger('HD44780-Sim')
+        self.log.setLevel(logging.DEBUG)
         self.wait_time = 0.037 # Simulated command wait time in ms
 
 

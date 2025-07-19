@@ -58,7 +58,7 @@ class HD44780():
         backlight (bool): Flag indicating whether the backlight is on or off. NOT FUNCTIONAL BOOO!
         Controller
         running (bool): Flag indicating whether the display is currently running or not.
-        cgrom (dict): A dictionary mapping character codes to their corresponding 8x8 pixel patterns.
+        TODO: cgrom (dict): A dictionary mapping character codes to their corresponding 8x8 pixel patterns.
         ddram (list): A list representing the DDRAM, where each element holds a byte of data for display.
         row_visible_address (list): A list defining the visible start address for each row in the DDRAM.
         ddram_pointer (int): Pointer to the current position in the DDRAM.
@@ -71,7 +71,7 @@ class HD44780():
         entry_mode_shift (bool): Flag indicating whether the display shifts when the cursor moves.
 
     Example:
-    The followinf example initialises a 16x2 display.
+    The following example initialises a 16x2 display.
     ```python
     from hd77480 import HD44780
     lcd = HD44780(lines=2, segments=16, pixel_size=5, pixel_border=0.15, line_margin=10)
@@ -125,7 +125,7 @@ class HD44780():
             0x29: [0x04, 0x02, 0x01, 0x01, 0x01, 0x02, 0x04, 0x00],  # ')'
             0x2A: [0x00, 0x04, 0x15, 0x0E, 0x0E, 0x15, 0x04, 0x00],  # '*'
             0x2B: [0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00, 0x00],  # '+'
-            0x2C: [0x00, 0x00, 0x00, 0x00, 0x04, 0x04, 0x02, 0x00],  # ','
+            0x2C: [0x00, 0x00, 0x00, 0x00, 0x04, 0x04, 0x08, 0x00],  # ','
             0x2D: [0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00, 0x00],  # '-'
             0x2E: [0x00, 0x00, 0x00, 0x00, 0x04, 0x00, 0x00, 0x00],  # '.'
             0x2F: [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00, 0x00],  # '/'
@@ -453,6 +453,7 @@ class HD44780():
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     self.running = False
+                    self.stop()
                 clock.tick(200)
 
         pygame.display.quit()
@@ -675,7 +676,7 @@ class HD44780():
         Subsequent data writes (with RS=1) will store custom pattern data.
         """
         self.cgram_address = addr % 64  # There are 64 bytes (6 bits) in CGRAM.
-        self.in_cgram_mode = True
+        # self.in_cgram_mode = True
     
     def write_data(self, data):
         """
@@ -696,7 +697,7 @@ class HD44780():
         #     self.cgrom[char_index] = self.cgram[char_index]
         # else:
         # Write to DDRAM
-        self.ddram[self.ddram_pointer] = data[0]
+        self.ddram[self.ddram_pointer] = ord(data[0])
         self.update_entry_mode() # Update display
     
     def read_data(self):
