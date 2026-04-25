@@ -18,6 +18,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 import pygame
 import threading
+from typing import Union
 
 class HD44780():
     """
@@ -237,6 +238,10 @@ class HD44780():
         self.entry_mode_dir = True
         self.entry_mode_shift = False
 
+        # Blinking
+        self.blink_start_time = 0
+        self.blink_interval = 500
+
         # Colors
         self.display_bg_color = (30, 120, 30)
         self.segment_bg_color = (30, 100, 30)
@@ -245,6 +250,7 @@ class HD44780():
 
         # Cursor
         self.cursor_char = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F]
+        self.cursor_underline = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x1F]
 
         # Segment size
         self.segment_width = self.cols * self.pixel_size
@@ -327,9 +333,8 @@ class HD44780():
         """
         Updates the appearance and blinking state of the cursor.
 
-        If cursor blinking is enabled, sets the cursor character pattern
-        to fully lit and toggles its visibility every 500 milliseconds.
-        If blinking is disabled, the cursor pattern is cleared.
+        If cursor blinking is enabled, toggles cursor visibility every 500 milliseconds.
+        If blinking is disabled but cursor is active, the cursor remains constantly visible.
         After updating the cursor, recalculates the cursor position based on the DDRAM pointer.
 
         Args:
@@ -338,13 +343,20 @@ class HD44780():
         Returns:
             None
         """
-        if self.cursor_blinking:
-            self.cursor_char = [0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F, 0x1F]
+        if self.cursor_active:
+            if self.cursor_blinking:
+                # Calculate blinking visibility
+                current_time = pygame.time.get_ticks()
+                elapsed = (current_time - self.blink_start_time) % (2 * self.blink_interval)
+                self.cursor_visible = elapsed < self.blink_interval
+            else:
+                # Non-blinking cursor is always visible when active
+                self.cursor_visible = True
         else:
-            self.cursor_char = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]
-        if self.cursor_blinking:
-            pygame.time.wait(500)  # Blink every 500ms
-            self.cursor_visible = not self.cursor_visible
+            # Cursor is not active, hide it
+            self.cursor_visible = False
+        # Set cursor character pattern based on visibility
+        self.cursor_char = self.cursor_underline if self.cursor_visible and self.cursor_active else [0x00] * 8
         self.set_cursor_ptr()
 
     def update_entry_mode(self):
@@ -376,7 +388,7 @@ class HD44780():
                     self.row_visible_address[x] -= 1
                     self.row_visible_address[x] %= 80
 
-    def shift_display(self, display_shift, shift_right):
+    def shift_display(self, display_shift: bool, shift_right: bool) -> None:
         """
         Shifts the visible display or moves the DDRAM address pointer.
 
@@ -404,9 +416,9 @@ class HD44780():
                     self.row_visible_address[x] %= 80
         else:
             if shift_right:
-                self.ddram_pointer += 1
-            else:
                 self.ddram_pointer -= 1
+            else:
+                self.ddram_pointer += 1
             self.ddram_pointer %= 80
 
 
@@ -470,7 +482,7 @@ class HD44780():
         """
         if not self.running:
             self.running = True
-            self.thread = threading.Thread(target=self.run, daemon=True)
+            self.thread = threading.Thread(target=self.run, daemon=False)
             self.thread.start()
 
     def stop(self):
@@ -486,7 +498,7 @@ class HD44780():
         if self.running:
             self.running = False
             if self.thread and self.thread.is_alive():
-                self.thread.join()
+                self.thread.join(timeout=1.0)
     
     def draw(self):
         """
@@ -558,11 +570,8 @@ class HD44780():
             return bitmap
 
         bitmap = cgrom_to_bitmap(self.grid[line][index], self.cols, self.rows)
-        if self.cursor_ptr == [line, index]:
-            if self.cursor_visible:
-                bitmap = cgrom_to_bitmap(self.cursor_char)
-            if self.cursor_active:
-                bitmap[7] = [1] * 5
+        if self.cursor_ptr == [line, index] and self.cursor_active and self.cursor_visible:
+            bitmap = cgrom_to_bitmap(self.cursor_char)
         for row in range(self.rows):
             for col in range(self.cols):
                 on = bitmap[row][col]
@@ -609,6 +618,8 @@ class HD44780():
         This sets all DDRAM addresses to the space character and resets the cursor to the home position.
         """
         self.ddram = [0x20] * 80  # Use 0x20 (space) as the blank character.
+        self.ddram_pointer = 0x00
+        self.row_visible_address = [0x00, 0x28, 0x14, 0x40]
     
     def return_home(self):
         """
@@ -637,6 +648,9 @@ class HD44780():
         self.cursor_active = cursor
         self.cursor_visible = cursor
         self.cursor_blinking = blink
+        # Initialize blink timer when blinking is enabled
+        if blink:
+            self.blink_start_time = pygame.time.get_ticks()
 
     def cursor_control(self, display_shift=False, shift_right=True):
         """
@@ -678,7 +692,7 @@ class HD44780():
         self.cgram_address = addr % 64  # There are 64 bytes (6 bits) in CGRAM.
         # self.in_cgram_mode = True
     
-    def write_data(self, data):
+    def write_data(self, data: Union[int, str]) -> None:
         """
         Write data to the DDRAM or CGRAM (depending on mode).
         Instruction: RS=1, RW=0, data=DB7-DB0.
@@ -697,7 +711,10 @@ class HD44780():
         #     self.cgrom[char_index] = self.cgram[char_index]
         # else:
         # Write to DDRAM
-        self.ddram[self.ddram_pointer] = ord(data[0])
+        if isinstance(data, str):
+            self.ddram[self.ddram_pointer] = ord(data[0])
+        else:
+            self.ddram[self.ddram_pointer] = data & 0xFF
         self.update_entry_mode() # Update display
     
     def read_data(self):

@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "hd44780-sim"
-version = "0.0.1"
+version = "0.1.0"
 description = "A simple simulator for HD44780 based displays"
 authors = ["Anubhav Mattoo <anubhavmattoo@outlook.com>"]
 license = "GPLv3"

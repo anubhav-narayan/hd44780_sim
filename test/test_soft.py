@@ -1,6 +1,6 @@
 import pytest
 
-from hd44780 import HD44780
+from hd44780_sim import HD44780
 
 
 @pytest.fixture
