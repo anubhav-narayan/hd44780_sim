@@ -62,8 +62,6 @@ def test_hello(lcd: HD44780):
 	lcd.ddram_pointer = 0x38
 	for x in "Hello, MX/11!":
 		lcd.write_data(x)
-		sleep(0.37)
 		lcd.cursor_control(display_shift=True, shift_right=False)
-		sleep(0.37)
 	lcd.thread.join(2)
 	lcd.stop()
