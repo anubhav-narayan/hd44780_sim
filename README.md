@@ -33,6 +33,8 @@ This project is the perfect starting point for:
 - **Realistic Simulation:** Emulates the standard functions of an HD44780 controller, including **some** instruction processing and data display.
 - **CoCoTB Integration:** Uses CoCoTB for a coroutine-based verification environment, allowing for efficient and dynamic test setups.
 - **Customizable Testbench:** Easily modify or extend simulation scenarios to suit your specific development needs.
+- **HD44780X 8-bit pinout:** Write full byte values or ASCII strings through `lcd.pinout`.
+- **Optional TTY mode:** Interpret newline, carriage return, backspace, tab, form feed, and common ANSI CSI cursor/erase sequences.
 - **Ease of Use:** Designed to run with minimal setup—clone the repository, install dependencies using Poetry, and simulate!
 
 ---
@@ -94,6 +96,22 @@ Any additional Python dependencies are managed via Poetry in the `pyproject.toml
 
 ---
 
+For an arbitrary-size software display, the 8-bit pinout accepts individual
+bytes and ASCII strings. Enable TTY parsing when terminal control sequences
+should be interpreted instead of displayed as data:
+
+```python
+from hd44780_sim import HD44780X
+
+lcd = HD44780X(segments=80, lines=24, tty_mode=True)
+lcd.pinout.write_ascii("Hello\n\x1b[2;1Hsecond line")
+```
+
+`write_tty(text)` also passes text through the TTY parser without changing the
+`tty_mode` setting. Supported CSI commands include cursor positioning and
+movement (`H`, `f`, `A`–`D`, `G`, `d`), erase display/line (`J`, `K`), and
+save/restore cursor (`s`, `u`).
+
 ## License
 
 This project is licensed under the GNU General Public License v3.0. See the [LICENSE](LICENSE.md) file for more details.
@@ -109,4 +127,3 @@ This project is licensed under the GNU General Public License v3.0. See the [LIC
 ---
 
 *Happy simulating! Explore, experiment, and feel free to reach out with questions or suggestions.*
-

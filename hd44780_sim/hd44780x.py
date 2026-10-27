@@ -23,6 +23,34 @@ from .hd44780 import HD44780
 _BLANK = [0x00] * 8
 
 
+class HD44780XPinout:
+    """Direct 8-bit data-bus interface for an :class:`HD44780X`."""
+
+    def __init__(self, lcd):
+        self.lcd = lcd
+        self.data = 0
+        self.rs = 1
+        self.rw = 0
+
+    def strobe(self):
+        """Latch the current RS, RW, and DB[7:0] pin values."""
+        return self.lcd.command(self.rs, self.rw, self.data)
+
+    def write_byte(self, value, *, rs=1, rw=0):
+        """Set the 8-bit data bus and strobe it as data or an instruction."""
+        if not isinstance(value, int) or not 0 <= value <= 0xFF:
+            raise ValueError("data bus value must be an integer from 0 to 255")
+        if rs not in (0, 1) or rw not in (0, 1):
+            raise ValueError("RS and RW must be 0 or 1")
+        self.data, self.rs, self.rw = value, rs, rw
+        return self.strobe()
+
+    def write_ascii(self, text):
+        """Transmit ASCII text as 8-bit data-bus writes."""
+        for value in text.encode("ascii"):
+            self.write_byte(value)
+
+
 def _geometry(segments, lines, cols, rows, pixel_size, segment_margin,
               line_margin, display_border, fit):
     """Resolve pixel size and margins so the window fits ``fit`` (w, h).
@@ -57,6 +85,7 @@ class HD44780X(HD44780):
                  window fits.  ``None`` disables auto-fit.  Default 1900x1000 (small
                  displays such as 16x2 are left exactly as the original draws them).
     fps          Refresh rate of the render thread.  Default 60.
+    tty_mode     Interpret data-register bytes as terminal text and ANSI controls.
 
     Addressing
     ----------
@@ -70,7 +99,7 @@ class HD44780X(HD44780):
     def __init__(self, segments=8, lines=1, cols=5, rows=8, pixel_size=None,
                  pixel_border=0.2, segment_margin=None, line_margin=None,
                  display_border=None, *, row_starts=None, line_length=None,
-                 ddram_size=None, fit=(1900, 1000), fps=60):
+                 ddram_size=None, fit=(1900, 1000), fps=60, tty_mode=False):
         ps, sm, lm, db = _geometry(segments, lines, cols, rows, pixel_size,
                                    segment_margin, line_margin, display_border, fit)
         super().__init__(segments, lines, cols, rows, ps, pixel_border, sm, lm, db)
@@ -83,6 +112,12 @@ class HD44780X(HD44780):
         self._last_ddram = None
         self.cells_drawn = 0                 # cells repainted by the last refresh
         self._configure(row_starts, line_length, ddram_size)
+        self.tty_mode = tty_mode
+        self._tty_state = "text"
+        self._tty_csi = ""
+        self._tty_saved_cursor = (0, 0)
+        self._tty_wrap_pending = False
+        self.pinout = HD44780XPinout(self)
 
     # ------------------------------------------------------------ state setup
     def _configure(self, row_starts, line_length, ddram_size):
@@ -125,8 +160,163 @@ class HD44780X(HD44780):
         for ch in text:
             self.write_data(ch)
 
+    def write_data(self, data):
+        """Write one byte; in TTY mode interpret controls and ANSI CSI input."""
+        if not self.tty_mode:
+            return super().write_data(data)
+        value = ord(data[0]) if isinstance(data, str) else data
+        if not isinstance(value, int) or not 0 <= value <= 0xFF:
+            raise ValueError("TTY data must be an 8-bit value")
+        self._tty_byte(value)
+
+    def write_tty(self, text):
+        """Write text through the TTY parser, independent of ``tty_mode``."""
+        payload = text.encode("latin-1") if isinstance(text, str) else bytes(text)
+        previous_mode = self.tty_mode
+        self.tty_mode = True
+        try:
+            for value in payload:
+                self.write_data(value)
+        finally:
+            self.tty_mode = previous_mode
+
+    def _tty_position(self):
+        for row, start in enumerate(self.row_starts):
+            offset = self.ddram_pointer - start
+            if 0 <= offset < self.segments:
+                return row, offset
+        return 0, 0
+
+    def _tty_move(self, row, col):
+        row = min(max(row, 0), self.lines - 1)
+        col = min(max(col, 0), self.segments - 1)
+        self.set_ddram_addr(self.xy_to_addr(row, col))
+        self._tty_wrap_pending = False
+
+    def _tty_scroll(self):
+        for row in range(self.lines - 1):
+            dst, src = self.row_starts[row], self.row_starts[row + 1]
+            for col in range(self.segments):
+                self.ddram[dst + col] = self.ddram[src + col]
+        last = self.row_starts[-1]
+        self.ddram[last:last + self.segments] = [0x20] * self.segments
+
+    def _tty_linefeed(self):
+        row, col = self._tty_position()
+        if row == self.lines - 1:
+            self._tty_scroll()
+        else:
+            row += 1
+        self._tty_move(row, col)
+
+    def _tty_erase_line(self, mode):
+        if mode not in (0, 1, 2):
+            return
+        row, col = self._tty_position()
+        start = 0 if mode == 1 else col
+        end = self.segments if mode == 0 else (col + 1 if mode == 1 else self.segments)
+        if mode == 2:
+            start, end = 0, self.segments
+        base = self.row_starts[row]
+        self.ddram[base + start:base + end] = [0x20] * (end - start)
+
+    def _tty_erase_display(self, mode):
+        row, col = self._tty_position()
+        if mode == 2 or mode == 3:
+            for base in self.row_starts:
+                self.ddram[base:base + self.segments] = [0x20] * self.segments
+        elif mode == 0:
+            self._tty_erase_line(0)
+            for base in self.row_starts[row + 1:]:
+                self.ddram[base:base + self.segments] = [0x20] * self.segments
+        elif mode == 1:
+            for base in self.row_starts[:row]:
+                self.ddram[base:base + self.segments] = [0x20] * self.segments
+            self._tty_erase_line(1)
+
+    def _tty_csi_command(self, command):
+        if self._tty_csi and not all(c.isdigit() or c == ";" for c in self._tty_csi):
+            return
+        params = [int(value) if value else 0 for value in self._tty_csi.split(";")]
+        first = params[0] if params else 0
+        row, col = self._tty_position()
+
+        if command in ("H", "f"):
+            target_row = (params[0] if params and params[0] else 1) - 1
+            target_col = (params[1] if len(params) > 1 and params[1] else 1) - 1
+            self._tty_move(target_row, target_col)
+        elif command == "A":
+            self._tty_move(row - (first or 1), col)
+        elif command == "B":
+            self._tty_move(row + (first or 1), col)
+        elif command == "C":
+            self._tty_move(row, col + (first or 1))
+        elif command == "D":
+            self._tty_move(row, col - (first or 1))
+        elif command == "G":
+            self._tty_move(row, (first or 1) - 1)
+        elif command == "d":
+            self._tty_move((first or 1) - 1, col)
+        elif command == "J":
+            self._tty_erase_display(first)
+        elif command == "K":
+            self._tty_erase_line(first)
+        elif command == "s":
+            self._tty_saved_cursor = (row, col)
+        elif command == "u":
+            self._tty_move(*self._tty_saved_cursor)
+
+    def _tty_byte(self, value):
+        if self._tty_state == "escape":
+            if value == ord("["):
+                self._tty_state = "csi"
+                self._tty_csi = ""
+            else:
+                self._tty_state = "text"
+            return
+        if self._tty_state == "csi":
+            if 0x40 <= value <= 0x7E:
+                self._tty_csi_command(chr(value))
+                self._tty_state = "text"
+                self._tty_csi = ""
+            elif 0x20 <= value <= 0x3F and len(self._tty_csi) < 32:
+                self._tty_csi += chr(value)
+            else:
+                self._tty_state = "text"
+                self._tty_csi = ""
+            return
+        if value == 0x1B:
+            self._tty_state = "escape"
+        elif value == 0x0A:
+            self._tty_linefeed()
+            row, _ = self._tty_position()
+            self._tty_move(row, 0)
+        elif value == 0x0D:
+            row, _ = self._tty_position()
+            self._tty_move(row, 0)
+        elif value == 0x08:
+            row, col = self._tty_position()
+            self._tty_move(row, col - 1)
+        elif value == 0x09:
+            row, col = self._tty_position()
+            self._tty_move(row, min(((col // 8) + 1) * 8, self.segments - 1))
+        elif value == 0x0C:
+            self.clear()
+        elif value >= 0x20 and value != 0x7F:
+            if self._tty_wrap_pending:
+                self._tty_linefeed()
+                row, _ = self._tty_position()
+                self._tty_move(row, 0)
+            row, col = self._tty_position()
+            self.ddram[self.xy_to_addr(row, col)] = value
+            if col == self.segments - 1:
+                self._tty_wrap_pending = True
+            else:
+                self._tty_move(row, col + 1)
+
     def set_ddram_addr(self, addr):
         self.ddram_pointer = addr % self.ddram_size
+        self._tty_wrap_pending = False
 
     def command(self, rs: int, rw: int, db: int, page=None):
         """Same as the original, plus the optional DDRAM address ``page``."""
@@ -179,10 +369,12 @@ class HD44780X(HD44780):
         self.ddram = [0x20] * self.ddram_size
         self.ddram_pointer = 0x00
         self.shift_offset = 0
+        self._tty_wrap_pending = False
 
     def return_home(self):
         self.ddram_pointer = 0x00
         self.shift_offset = 0
+        self._tty_wrap_pending = False
 
     # --------------------------------------------------------------- rendering
     def update_display(self, **kwargs):

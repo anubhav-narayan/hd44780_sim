@@ -4,7 +4,7 @@ import pygame
 import pytest
 
 from hd44780_sim import HD44780
-from hd44780_sim import HD44780X
+from hd44780_sim import HD44780X, HD44780XPinout
 
 
 def text(lcd, row):
@@ -33,6 +33,7 @@ def test_is_a_drop_in_subclass():
                  "set_ddram_addr", "write_data", "read_data", "command",
                  "update_display", "set_backlight", "draw"):
         assert callable(getattr(lcd, name))
+    assert isinstance(lcd.pinout, HD44780XPinout)
 
 
 def test_original_constructor_signature_positional():
@@ -117,6 +118,59 @@ def test_read_data_matches_write():
     lcd.write_data("Q")
     lcd.goto(5, 7)
     assert lcd.command(1, 1, 0) == ord("Q")
+
+
+def test_eight_bit_pinout_writes_ascii_and_full_byte_values():
+    lcd = HD44780X(8, 2)
+    lcd.pinout.write_ascii("ASCII")
+    assert [lcd.ddram[i] for i in range(5)] == list(b"ASCII")
+    lcd.goto(1, 0)
+    lcd.pinout.write_byte(0xE9)
+    assert lcd.ddram[lcd.xy_to_addr(1, 0)] == 0xE9
+    with pytest.raises(ValueError):
+        lcd.pinout.write_byte(0x100)
+    with pytest.raises(UnicodeEncodeError):
+        lcd.pinout.write_ascii("é")
+
+
+def test_pinout_instruction_strobe_and_tty_mode():
+    lcd = HD44780X(8, 2, tty_mode=True)
+    lcd.pinout.write_byte(0x0C, rs=0)                       # display on
+    lcd.pinout.write_ascii("Hello")
+    assert text(lcd, 0).startswith("Hello")
+    lcd.pinout.write_byte(ord("!"))
+    assert text(lcd, 0).startswith("Hello!")
+
+
+def test_tty_csi_cursor_position_and_erase():
+    lcd = HD44780X(8, 3)
+    lcd.write_tty("abcdefgh")
+    lcd.write_tty("\x1b[2;3HZ")
+    assert text(lcd, 1) == "  Z     "
+    lcd.write_tty("\x1b[2K")
+    assert text(lcd, 1) == "        "
+    assert lcd.ddram_pointer == lcd.xy_to_addr(1, 3)
+    lcd.write_tty("\x1b[2J")
+    assert all(text(lcd, row) == " " * 8 for row in range(3))
+
+
+def test_tty_control_characters_and_scrolling():
+    lcd = HD44780X(4, 2)
+    lcd.write_tty("1111\n2222\nX")
+    assert text(lcd, 0) == "2222"
+    assert text(lcd, 1) == "X   "
+    lcd.write_tty("\rY")
+    assert text(lcd, 1) == "Y   "
+    lcd.write_tty("\x1b[1;4H\x08Z")
+    assert text(lcd, 0) == "22Z2"
+
+
+def test_tty_parser_accepts_sequences_split_across_writes():
+    lcd = HD44780X(8, 2, tty_mode=True)
+    for byte in b"\x1b[2;2HQ":
+        lcd.pinout.write_byte(byte)
+    assert text(lcd, 1) == " Q      "
+    assert lcd.ddram_pointer == lcd.xy_to_addr(1, 2)
 
 
 def test_custom_row_starts_emulate_a_datasheet_16x2():
